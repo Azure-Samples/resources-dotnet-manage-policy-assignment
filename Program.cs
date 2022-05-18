@@ -1,12 +1,12 @@
 ﻿// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License. See License.txt in the project root for license information.
 
-using Microsoft.Azure.Management.Fluent;
-using Microsoft.Azure.Management.ResourceManager.Fluent;
-using Microsoft.Azure.Management.ResourceManager.Fluent.Authentication;
-using Microsoft.Azure.Management.ResourceManager.Fluent.Core;
-using Microsoft.Azure.Management.Samples.Common;
-using System;
+using Azure;
+using Azure.Core;
+using Azure.Identity;
+using Azure.ResourceManager;
+using Azure.ResourceManager.Resources;
+using Azure.ResourceManager.Resources.Models;
 
 namespace ManagePolicyAssignment
 {
@@ -19,135 +19,140 @@ namespace ManagePolicyAssignment
         * - List policy assignments
         * - Delete policy assignments.
         */
-        public static void RunSample(IAzure azure)
+        public static async Task RunSample(ArmClient client)
         {
-            var resourceGroupName = SdkContext.RandomResourceName("rgRSMPA", 24);
-            var policyDefinitionName = SdkContext.RandomResourceName("pdn", 24);
-            var policyAssignmentName1 = SdkContext.RandomResourceName("pan1", 24);
-            var policyAssignmentName2 = SdkContext.RandomResourceName("pan2", 24);
+            var resourceGroupName = "rgRSMPA";
+            var policyDefinitionName = "pdn";
+            var policyAssignmentName1 = "pan1";
+            var policyAssignmentName2 = "pan2";
             var policyRuleJson = "{\"if\":{\"not\":{\"field\":\"location\",\"in\":[\"northeurope\",\"westeurope\"]}},\"then\":{\"effect\":\"deny\"}}";
+
+            SubscriptionResource subscription = await client.GetDefaultSubscriptionAsync();
             try
             {
                 //=============================================================
                 // Create resource group.
+                Console.WriteLine($"Creating a resource group with name: {resourceGroupName}");
 
-                Utilities.Log("Creating a resource group with name: " + resourceGroupName);
+                var lro = await subscription.GetResourceGroups().CreateOrUpdateAsync(WaitUntil.Completed, resourceGroupName, new ResourceGroupData(AzureLocation.WestUS));
+                var resourceGroup = lro.Value;
 
-                var resourceGroup = azure.ResourceGroups.Define(resourceGroupName)
-                    .WithRegion(Region.USWest)
-                    .Create().Refresh();
-
-                Utilities.Log("Resource group created: " + resourceGroup.Id);
+                Console.WriteLine($"Resource group created: {resourceGroup.Id}");
 
                 //=============================================================
                 // Create policy definition.
+                Console.WriteLine($"Creating a policy definition with name: {policyDefinitionName}");
 
-                Utilities.Log("Creating a policy definition with name: " + policyDefinitionName);
+                var policyDefinitionData = new PolicyDefinitionData
+                {
+                    PolicyRule = BinaryData.FromString(policyRuleJson),
+                    PolicyType = PolicyType.Custom,
+                };
+                var pdLro = await subscription.GetSubscriptionPolicyDefinitions().CreateOrUpdateAsync(WaitUntil.Completed, policyDefinitionName, policyDefinitionData);
+                SubscriptionPolicyDefinitionResource policyDefinition = pdLro.Value;
 
-                var policyDefinition = azure.PolicyDefinitions.Define(policyDefinitionName)
-                    .WithPolicyRuleJson(policyRuleJson)
-                    .WithCustomPolicyType()
-                    .Create().Refresh();
-
-                Utilities.Log("Policy definition created: " + policyDefinition.Id);
+                Console.WriteLine($"Policy definition created: {policyDefinition.Id}");
 
                 //=============================================================
                 // Create policy assignment.
 
-                Utilities.Log("Creating a policy assignment with name: " + policyAssignmentName1);
+                Console.WriteLine($"Creating a policy assignment with name: {policyAssignmentName1}");
 
-                var policyAssignment = azure.PolicyAssignments.Define(policyAssignmentName1)
-                    .ForResourceGroup(resourceGroup)
-                    .WithPolicyDefinition(policyDefinition)
-                    .WithDefaultMode()
-                    .Create().Refresh();
+                var policyAssignmentData = new PolicyAssignmentData
+                {
+                    PolicyDefinitionId = policyDefinition.Id,
+                    EnforcementMode = EnforcementMode.Enforced,
+                };
+                var policyAssignmentLro = await resourceGroup.GetPolicyAssignments().CreateOrUpdateAsync(WaitUntil.Completed, policyAssignmentName1, policyAssignmentData);
+                var policyAssignment = policyAssignmentLro.Value;
 
-                Utilities.Log("Policy assignment created: " + policyAssignment.Id);
+                Console.WriteLine($"Policy assignment created: {policyAssignment.Id}");
 
                 //=============================================================
                 // Create another policy assignment.
 
-                Utilities.Log("Creating a policy assignment with name: " + policyAssignmentName2);
+                Console.WriteLine($"Creating a policy assignment with name: {policyAssignmentName2}");
 
-                var policyAssignment2 = azure.PolicyAssignments.Define(policyAssignmentName2)
-                    .ForResourceGroup(resourceGroup)
-                    .WithPolicyDefinition(policyDefinition)
-                    .WithDoNotEnforceMode()
-                    .Create().Refresh();
+                policyAssignmentData = new PolicyAssignmentData
+                {
+                    PolicyDefinitionId = policyDefinition.Id,
+                    EnforcementMode = EnforcementMode.DoNotEnforce,
+                };
+                policyAssignmentLro = await resourceGroup.GetPolicyAssignments().CreateOrUpdateAsync(WaitUntil.Completed, policyAssignmentName2, policyAssignmentData);
+                var policyAssignment2 = policyAssignmentLro.Value;
 
-                Utilities.Log("Policy assignment created: " + policyAssignment2.Id);
+                Console.WriteLine($"Policy assignment created: {policyAssignment2.Id}");
 
                 //=============================================================
                 // List policy assignments.
 
-                Utilities.Log("Listing all policy assignments: ");
+                Console.WriteLine("Listing all policy assignments: ");
 
-                foreach (var pAssignment in azure.PolicyAssignments.List())
+                foreach (var pAssignment in resourceGroup.GetPolicyAssignments())
                 {
-                    Utilities.Log("Policy assignment: " + pAssignment.Name);
+                    Console.WriteLine($"Policy assignment: {pAssignment.Id}");
                 }
 
                 //=============================================================
                 // Delete policy assignments.
 
-                Utilities.Log("Deleting policy assignment: " + policyAssignmentName1);
+                Console.WriteLine($"Deleting policy assignment: {policyAssignmentName1}");
 
-                azure.PolicyAssignments.DeleteById(policyAssignment.Id);
+                await policyAssignment.DeleteAsync(WaitUntil.Completed);
 
-                Utilities.Log("Deleted policy assignment: " + policyAssignmentName1);
+                Console.WriteLine($"Deleted policy assignment: {policyAssignmentName1}");
 
-                Utilities.Log("Deleting policy assignment: " + policyAssignmentName2);
+                Console.WriteLine($"Deleting policy assignment: {policyAssignmentName2}");
 
-                azure.PolicyAssignments.DeleteById(policyAssignment2.Id);
+                await policyAssignment2.DeleteAsync(WaitUntil.Completed);
 
-                Utilities.Log("Deleted policy assignment: " + policyAssignmentName2);
+                Console.WriteLine($"Deleted policy assignment: {policyAssignmentName2}");
 
                 //=============================================================
                 // Delete policy definition.
 
-                Utilities.Log("Deleting policy definition: " + policyDefinitionName);
+                Console.WriteLine($"Deleting policy definition: {policyDefinitionName}");
 
-                azure.PolicyDefinitions.DeleteByName(policyDefinitionName);
+                await policyDefinition.DeleteAsync(WaitUntil.Completed);
 
-                Utilities.Log("Deleted policy definition: " + policyDefinitionName);
+                Console.WriteLine($"Deleted policy definition: {policyDefinitionName}");
             }
             finally
             {
                 try
                 {
-                    Utilities.Log("Deleting Resource Group: " + resourceGroupName);
+                    Console.WriteLine($"Deleting Resource Group: {resourceGroupName}");
 
-                    azure.ResourceGroups.DeleteByName(resourceGroupName);
+                    var resourceGroupId = ResourceGroupResource.CreateResourceIdentifier(subscription.Data.SubscriptionId, resourceGroupName);
+                    await client.GetResourceGroupResource(resourceGroupId).DeleteAsync(WaitUntil.Completed);
 
-                    Utilities.Log("Deleted Resource Group: " + resourceGroupName);
+                    Console.WriteLine($"Deleted Resource Group: {resourceGroupName}");
                 }
                 catch (Exception ex)
                 {
-                    Utilities.Log(ex);
+                    Console.WriteLine(ex);
                 }
             }
             
         }
 
-        public static void Main(string[] args)
+        public static async Task Main(string[] args)
         {
             try
             {
                 //=================================================================
                 // Authenticate
-                AzureCredentials credentials = SdkContext.AzureCredentialsFactory.FromFile(Environment.GetEnvironmentVariable("AZURE_AUTH_LOCATION"));
+                var credential = new DefaultAzureCredential();
 
-                var azure = Azure
-                    .Configure()
-                    .WithLogLevel(HttpLoggingDelegatingHandler.Level.Basic)
-                    .Authenticate(credentials)
-                    .WithDefaultSubscription();
+                var subscriptionId = Environment.GetEnvironmentVariable("AZURE_SUBSCRIPTION_ID");
+                // you can also use `new ArmClient(credential)` here, and the default subscription will be the first subscription in your list of subscription
+                var client = new ArmClient(credential, subscriptionId);
 
-                RunSample(azure);
+                await RunSample(client);
             }
             catch (Exception ex)
             {
-                Utilities.Log(ex);
+                Console.WriteLine(ex);
             }
         }
     }
