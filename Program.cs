@@ -34,6 +34,8 @@ namespace ManagePolicyAssignment
                 // Create resource group.
                 Console.WriteLine($"Creating a resource group with name: {resourceGroupName}");
 
+                // this operation returns an ArmOperation which is used to track the status of an operation that might take a long time
+                // by passing `WaitUntil.Completed` will automatically make the function to wait for the completion of this operation
                 var lro = await subscription.GetResourceGroups().CreateOrUpdateAsync(WaitUntil.Completed, resourceGroupName, new ResourceGroupData(AzureLocation.WestUS));
                 var resourceGroup = lro.Value;
 
